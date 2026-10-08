@@ -249,6 +249,7 @@ class TestPrimaryMessageRuntimeScope:
             "platform_toolsets:\n  discord:\n    - discord\n", encoding="utf-8"
         )
         monkeypatch.setattr(run_mod, "get_hermes_home", lambda: home)
+        monkeypatch.setenv("HERMES_HOME", str(home))
         monkeypatch.setenv("DISCORD_BOT_TOKEN", "wrong-process-token")
         secret_scope.set_multiplex_active(True)
 
@@ -297,6 +298,7 @@ class TestPrimaryMessageRuntimeScope:
         (sharik / "config.yaml").write_text("{}\n", encoding="utf-8")
 
         monkeypatch.setattr(run_mod, "get_hermes_home", lambda: home)
+        monkeypatch.setenv("HERMES_HOME", str(home))
         secret_scope.set_multiplex_active(True)
 
         runner = GatewayRunner.__new__(GatewayRunner)

@@ -302,3 +302,22 @@ def test_launch_turn_binds_terminal_scope_once_multiplexing_is_active(
     finally:
         reset_terminal_scope(token)
     assert get_terminal_scope() is None
+
+
+def test_profile_cwd_placeholder_replaces_polluted_launch_overlay(tmp_path, monkeypatch):
+    """A profile's explicit placeholder must not retain another profile's captured cwd."""
+    from tools.terminal_scope import build_profile_terminal_scope
+
+    launch_home = tmp_path / ".hermes"
+    launch_home.mkdir(exist_ok=True)
+    (launch_home / "config.yaml").write_text(
+        "terminal:\n  backend: local\n  cwd: .\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("tools.terminal_scope.Path.home", lambda: tmp_path)
+
+    scope = build_profile_terminal_scope(
+        launch_home,
+        env_overlay={"TERMINAL_CWD": str(tmp_path / "profiles" / "athena")},
+    )
+
+    assert scope["TERMINAL_CWD"] == str(tmp_path)

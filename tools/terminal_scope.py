@@ -172,6 +172,11 @@ def build_profile_terminal_scope(
             raise TerminalPolicyUnavailable(f"cannot parse {config_path}: {exc}") from exc
         raw_terminal = raw.get("terminal") if isinstance(raw, dict) else None
         if isinstance(raw_terminal, dict):
+            configured_cwd = raw_terminal.get("cwd")
+            if configured_cwd is not None and str(configured_cwd).strip() in {".", "auto", "cwd"}:
+                # A placeholder is an explicit profile choice. It must replace, not preserve,
+                # TERMINAL_CWD inherited through the trusted launch overlay.
+                scope.pop("TERMINAL_CWD", None)
             _apply_terminal_mapping(scope, raw_terminal)
             image_pinned = image_pinned or "docker_image" in raw_terminal
     scope["TERMINAL_DOCKER_IMAGE_PINNED"] = "1" if image_pinned else "0"

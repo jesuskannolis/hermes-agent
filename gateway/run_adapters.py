@@ -1744,9 +1744,14 @@ class GatewayAdapterLifecycleMixin:
 
     def _make_default_profile_message_handler(self):
         """Scope primary-adapter messages to their routed multiplex profile. Authorization stays
-        with the transport profile (a routed profile may have no credential/allowlist)."""
-        from gateway.run import _async_profile_runtime_scope, get_hermes_home
-        default_home = Path(get_hermes_home())
+        with the transport profile (a routed profile may have no credential/allowlist).
+
+        Resolve the default home from the process identity, not the ambient profile scope. This
+        factory can run while secondary profiles are being wired, so context-local home resolution
+        can permanently bind the primary bot to a secondary profile.
+        """
+        from gateway.run import _async_profile_runtime_scope
+        default_home = self._default_profile_home()
         from gateway.session_ingress_context import register_transport_home
         register_transport_home(self, None, default_home)
 
@@ -1764,10 +1769,10 @@ class GatewayAdapterLifecycleMixin:
         """Busy-path twin of ``_make_default_profile_message_handler``: busy callbacks bypass the message
         handler, so the routed scope and transport-home authorization must be re-established here or the
         follow-up is authorized in whatever scope is ambient (#103717)."""
-        from gateway.run import _async_profile_runtime_scope, get_hermes_home
-        default_home = Path(get_hermes_home())
+        from gateway.run import _async_profile_runtime_scope
 
         async def _handler(event, _session_key):
+            default_home = self._default_profile_home()
             source = event.source
             profile_home = self._admit_primary_source(source, default_home)
             if profile_home is None:
@@ -1840,10 +1845,10 @@ class GatewayAdapterLifecycleMixin:
 
     def _make_default_profile_platform_event_handler(self):
         """Scope primary-transport events to their routed multiplex profile."""
-        from gateway.run import _profile_runtime_scope, get_hermes_home
-        default_home = Path(get_hermes_home())
+        from gateway.run import _profile_runtime_scope
 
         async def _handler(event, source):
+            default_home = self._default_profile_home()
             profile_home = self._admit_primary_source(source, default_home)
             if profile_home is None:
                 return None  # rejected route: same disposition as the message ingress gate
@@ -1856,6 +1861,13 @@ class GatewayAdapterLifecycleMixin:
         if self._multiplex_on():
             return self._make_default_profile_platform_event_handler()
         return self._standalone_scoped(self._handle_gateway_platform_event)
+
+    @staticmethod
+    def _default_profile_home() -> Path:
+        """Return the launch process home, never a context-local profile override."""
+        from hermes_constants import get_process_hermes_home
+
+        return Path(get_process_hermes_home())
 
     @staticmethod
     def _adapter_credential_claim(platform: Platform, adapter: Any) -> Optional[tuple]:
@@ -1940,8 +1952,7 @@ class GatewayAdapterLifecycleMixin:
         back to os.environ (the default profile's env) and denies the secondary's own allowlisted
         callers (#120639).
         """
-        from gateway.run import get_hermes_home
-        transport_home = Path(get_hermes_home()) if self._multiplex_on() and profile_name is None else None
+        primary_transport = self._multiplex_on() and profile_name is None
         # Resolved once; the scope is entered per call so an ``.env`` allowlist edit reaches the next
         # tap, matching the message path's per-message re-read.
         profile_home = self._routed_profile_home(profile_name) if profile_name else None
@@ -1952,6 +1963,7 @@ class GatewayAdapterLifecycleMixin:
         ) -> bool:
             if not user_id:
                 return False
+            transport_home = self._default_profile_home() if primary_transport else None
             source = SessionSource(
                 platform=platform, chat_id=chat_id or "", chat_type=chat_type or "group",
                 user_id=user_id, thread_id=thread_id, is_bot=bool(is_bot), profile=profile_name,
