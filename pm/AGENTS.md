@@ -19,9 +19,11 @@ isolated tool environments. Callers receive an interpreter or tool path, not uv.
 Nix's declarative uv2nix builds and unrelated user projects remain independently owned.
 
 The `[tool.uv] exclude-newer = "3 days"` release-age check covers **Hermes's own dependencies
-only**, exact pins included, with one per-package exemption class: CA trust stores (`certifi`),
-whose revocation releases must reach the lock the day they ship (`exclude-newer-package`; nothing
-else goes there). It runs when Hermes LOCKS
+only**, exact pins included. CA trust stores (`certifi`) may bypass it so revocations ship
+immediately. JJ approved one specific emergency exception on 2026-10-24: exact
+`brotlicffi==1.2.1.0` for CVE-2026-111497. No other compression release is exempt;
+remove this exception on the next lock after 2026-10-25T16:19Z, when this release ages in.
+The packaging test enforces the exception and exact pin. It runs when Hermes LOCKS
 (`hermes pm lock`, CI's lock check), never on users' machines: every generated workspace drops the
 cutoff (`pm/workspace.py::_without_release_age`), so a mirror without upload times cannot break an
 install (#135589). Plugin resolution is unchanged by this: core's exact pins stay put, and a plugin

@@ -54,6 +54,8 @@ def test_starlette_server_pins_and_lock_exclude_cve_2026_48710():
 
 
 CA_TRUST_PACKAGES = {"certifi"}
+# JJ-approved emergency release; remove after 2026-10-25T16:19Z.
+EMERGENCY_SECURITY_PINS = {"brotlicffi": "1.2.1.0"}
 
 
 def test_every_dependency_is_held_to_one_three_day_release_age():
@@ -61,14 +63,21 @@ def test_every_dependency_is_held_to_one_three_day_release_age():
 
     A per-package exemption or date would quietly let a fresh release into the lock; the
     check runs at lock time only, so users never need a mirror that serves upload times.
-    The sole exception is CA trust stores: a CA revocation must ship the day it is released.
+    CA trust stores and the explicit, owner-approved emergency security pin are exempt.
     """
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     uv = manifest["tool"]["uv"]
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     assert uv["exclude-newer"] == "3 days"
     exempt = uv.get("exclude-newer-package", {})
-    assert set(exempt) <= CA_TRUST_PACKAGES, exempt
+    assert set(exempt) <= CA_TRUST_PACKAGES | EMERGENCY_SECURITY_PINS.keys(), exempt
+    requirements = [*manifest["project"]["dependencies"],
+                    *(req for extra in manifest["project"].get("optional-dependencies", {}).values()
+                      for req in extra)]
+    for name, version in EMERGENCY_SECURITY_PINS.items():
+        assert f"{name}=={version}" in requirements
+        locked = [row["version"] for row in lock["package"] if row["name"] == name]
+        assert locked and set(locked) == {version}
     assert all(value is False for value in exempt.values()), exempt
     assert lock["options"].get("exclude-newer-span") == "P3D"
     assert lock["options"].get("exclude-newer-package", {}) == exempt
