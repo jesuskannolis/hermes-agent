@@ -45,7 +45,14 @@ async def _build_profile_authority(runner, name, home, *, register):
         db = getattr(runner._session_db, '_db', runner._session_db)
         if db is None:
             raise RuntimeError(_store_open_failure(runner, home))
-        if (await asyncio.to_thread(Path(db.db_path).resolve)).parent != home:
+        # A profile may relocate its store through state.db (for example local-db/).
+        # Compare the actual store to that exact profile path, including symlinks.
+        expected_db = home / 'state.db'
+        actual_path, expected_path = await asyncio.gather(
+            asyncio.to_thread(Path(db.db_path).resolve),
+            asyncio.to_thread(expected_db.resolve),
+        )
+        if actual_path != expected_path:
             raise RuntimeError(f'session authority database does not belong to the reserved profile {home}')
         registry.add(home, None, name=name)
         try:
