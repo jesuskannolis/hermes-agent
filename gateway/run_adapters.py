@@ -1812,10 +1812,13 @@ class GatewayAdapterLifecycleMixin:
         credentials after a hosted room flipped the process-wide guard (#112878). The credential
         body is marked at entry (``launch_body``): a turn already running when a second profile
         switches this gateway to multiplexing keeps resolving its launch credentials."""
-        from tui_gateway.launch_profile_policy import launch_body
+        from tui_gateway.launch_profile_policy import launch_body, launch_profile_runtime_scope
 
         async def _handler(*args):
-            with launch_body(), self._standalone_launch_scope():
+            with (
+                launch_body(),
+                launch_profile_runtime_scope(self._default_profile_home()),
+            ):
                 return await handler(*args)
 
         return _handler
