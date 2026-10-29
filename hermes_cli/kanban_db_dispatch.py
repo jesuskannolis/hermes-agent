@@ -2001,6 +2001,9 @@ def dispatch_once(
     ``skipped_locked=True`` and writes nothing; the lock is keyed on the
     resolved DB path so unrelated boards tick in parallel.
     """
+    from hermes_cli.changeover_standby import paused
+    if paused():
+        return DispatchResult()
     def _locked_tick() -> DispatchResult:
         return _dispatch_once_locked(
             conn,

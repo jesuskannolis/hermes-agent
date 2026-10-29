@@ -137,6 +137,8 @@ def _check_dispatcher_presence(hermes_home: Optional[Path] = None) -> tuple[bool
 # --- Command dispatch ---
 
 def kanban_command(args: argparse.Namespace) -> int:
+    from hermes_cli.changeover_standby import assert_available
+    assert_available()
     """Entry point from ``hermes kanban …``; returns a shell-style exit code."""
     action = getattr(args, "kanban_action", None)
     if not action:
