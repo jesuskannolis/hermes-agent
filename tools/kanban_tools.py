@@ -83,6 +83,9 @@ def _is_dispatcher_owned_worker() -> bool:
 def _visible(*, to_env_worker: bool) -> bool:
     """check_fn core: never for delegate children; dispatcher-spawned env workers
     (HERMES_KANBAN_TASK) per flag; else the profile toolset decides."""
+    from hermes_cli.changeover_standby import paused
+    if paused():
+        return False
     if _is_delegated_child_context():
         return False
     if os.environ.get("HERMES_KANBAN_TASK") and _is_dispatcher_owned_worker():
