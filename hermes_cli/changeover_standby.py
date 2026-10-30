@@ -9,7 +9,7 @@ def paused():
     if not marker.exists():
         return False
     try:
-        return json.loads(marker.read_text()).get('kanban') == 'paused'
+        return json.loads(marker.read_text(encoding="utf-8-sig")).get('kanban') == 'paused'
     except (OSError, ValueError, TypeError):
         return True  # broken control state never silently enables dispatch
 

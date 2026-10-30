@@ -154,68 +154,28 @@ def finish_text_response(
     agent._emit_pending_fallback_notice()
     agent._clear_status_buffer()
 
-    # Defensive: repair malformed role-alternation before API call. Catches cases where the history got
-    # wedged into a ``tool → user`` or ``user → user`` tail (e.g. after empty- response scaffolding was
-    # stripped and a new user message landed after an orphan tool result). Most providers return empty
-    # content on malformed sequences, which would otherwise retrigger the empty-retry loop indefinitely.
-    # repair_message_sequence_with_cursor also recomputes the SessionDB flush cursor (_last_flushed_db_idx)
-    # when repair compacts the list, so the turn-end flush doesn't skip the assistant/tool chain (#44837).
-    # One-time repeated-heal escalation notice (#96870): if the sanitizer above just crossed the per-session
-    # heal threshold, deliver the queued notice through the status/warning callback — the normal out-of-band
-    # delivery channel (gateway status message / CLI print). NEVER appended to messages/api_messages:
-    # conversation context and the cached prompt prefix stay byte-identical.
-    from agent.agent_runtime_helpers import (
-        intent_ack_continuation_mode, looks_like_degenerate_final, promoted_reasoning_announces_action,
-        tool_results_this_turn, trailing_continue_intent,
-    )
+    from agent.turn_continuation import choose_continuation
+    from agent.execution_response_guard import NUDGE, EXHAUSTED
+    from agent.agent_runtime_helpers import tool_results_this_turn
 
-    _ack_mode = intent_ack_continuation_mode(agent)
-    # Said-continue-but-stopped guard: no tool calls but the short reply TAILS with an
-    # announced next action. Reuses the SAME bounded continuation counter (max 2 per turn).
-    # Promoted reasoning gets the broader first-person-plan tail detector: with tools offered
-    # and zero tool calls, chain-of-thought ending on "Let me batch the terminal calls..." is a
-    # stalled model, and returning it as the answer aborts the tool loop while reporting
-    # "complete" (#111761). Same cap, so a model that never acts still ends after 2 nudges.
     _stall_text = agent._strip_think_blocks(final_response or "")
-    _stall_continue_intent = (
-        bool(getattr(agent, "_stall_guards", True))
-        and agent.valid_tool_names
-        and codex_ack_continuations < 2
-        and (
-            trailing_continue_intent(_stall_text)
-            or (bool(_promoted) and promoted_reasoning_announces_action(_stall_text))
-        )
-    )
-    # Degenerate-final guard (#103483): the turn did real tool work and then stopped on a
-    # fragment. Same scope knob and the SAME bounded counter as the ack continuation; the nudge
-    # row itself closes the tool-work window, so a second fragment ends the turn as the answer.
     _tool_rows = tool_results_this_turn(messages)
-    _degenerate_final = (
-        bool(getattr(agent, "_stall_guards", True))
-        and _ack_mode != "off"
-        and codex_ack_continuations < 2
-        and _tool_rows > 0
-        and looks_like_degenerate_final(_stall_text, user_message=user_message)
+    _continuation_kind, execution_problem = choose_continuation(
+        agent, user_message, final_response, _stall_text, messages,
+        codex_ack_continuations, _promoted, _tool_rows,
     )
-    # Precedence: an announced next action outranks the fragment shape; the codex ack is last.
-    if _stall_continue_intent:
-        _continuation_kind = "stall"
-    elif _degenerate_final:
-        _continuation_kind = "degenerate"
-    elif (
-        _ack_mode != "off"
-        and agent.valid_tool_names
-        and codex_ack_continuations < 2
-        and agent._looks_like_codex_intermediate_ack(
-            user_message=user_message, assistant_content=final_response, messages=messages,
-            require_workspace=(_ack_mode == "codex_only"),
-        )
-    ):
-        _continuation_kind = "ack"
-    else:
-        _continuation_kind = None
+    if _continuation_kind == "exhausted":
+        logger.warning("Execution check exhausted: session=%s reason=%s", agent.session_id, execution_problem)
+        agent._persist_session(messages, conversation_history)
+        return _verdict("return", stamp_failure(
+            partial_result(messages, api_call_count, EXHAUSTED, "execution_stalled"),
+            "invalid_response", False,
+        ))
+
     if _continuation_kind:
-        if _continuation_kind == "stall":
+        if _continuation_kind == "execution":
+            logger.info("Execution check: session=%s reason=%s retry=%s/2", agent.session_id, execution_problem, codex_ack_continuations + 1)
+        elif _continuation_kind == "stall":
             logger.info(
                 "Stall guard: turn ending on trailing continue-"
                 "intent with no tool calls — re-prompting to act "
@@ -234,10 +194,13 @@ def finish_text_response(
             # ``reasoning_content``, or the continuation replays an empty assistant turn.
             interim_msg["api_content"] = final_response
         append_message(messages, interim_msg)
-        agent._emit_interim_assistant_message(interim_msg)
+        if _continuation_kind != "execution":
+            agent._emit_interim_assistant_message(interim_msg)
         append_message(messages, {
             "role": "user",
+            "_execution_recovery_nudge": _continuation_kind == "execution",
             "content": (
+                NUDGE if _continuation_kind == "execution" else
                 _DEGENERATE_FINAL_NUDGE if _continuation_kind == "degenerate"
                 else _CODEX_ACK_CONTINUATION_NUDGE
             ),

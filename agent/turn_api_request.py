@@ -155,6 +155,14 @@ def build_api_request(
         _original_api_kwargs = dict(api_kwargs)
         _llm_middleware_trace = []
 
+    from agent.execution_response_guard import request_tool_names
+    agent._last_request_tool_names = request_tool_names(api_kwargs)
+    logger.info(
+        "Execution request capability: session=%s turn=%s call=%s tools=%s tool_choice=%s",
+        agent.session_id, turn_id, api_call_count, ",".join(agent._last_request_tool_names),
+        str(api_kwargs.get("tool_choice", "auto"))[:100],
+    )
+
     _fire_pre_api_request_hook(
         agent, api_kwargs, api_messages, _llm_middleware_trace, messages=messages,
         original_user_message=original_user_message, approx_tokens=approx_tokens,
